@@ -36,5 +36,20 @@ namespace Pinger
         /// Gets or sets the error message if the ping failed
         /// </summary>
         public string ErrorMessage { get; set; }
+
+        public PingResult Copy()
+        {
+            PingResult result = new PingResult();
+
+            result.Host = Host;
+            result.IpAddress = IpAddress;
+            result.Timeout = Timeout;
+            result.Bytes = Bytes;
+            result.Sent = Sent;
+            result.Milliseconds = Milliseconds;
+            result.ErrorMessage = ErrorMessage;
+
+            return result;
+        }
     }
 }

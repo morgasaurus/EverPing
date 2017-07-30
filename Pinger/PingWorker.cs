@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace Pinger
 {
@@ -37,9 +37,10 @@ namespace Pinger
             KeepResults = false;
         }
 
+        private const int Infinity = System.Threading.Timeout.Infinite;
+
         /// <summary>
-        /// Occurs when a ping is complete either by response or error
-        /// WARNING: If you handle this event by invoking on an STAThread then DO NOT call Stop on the same thread or you may deadlock
+        /// Occurs when a ping request is completed or results in an error
         /// </summary>
         public event EventHandler<PingCompleteEventArgs> PingComplete;
 
@@ -139,11 +140,6 @@ namespace Pinger
             }
         }
         private int _TimeBetween;
-
-        /// <summary>
-        /// Flag to track whether or not the PingWorker is currently doing work
-        /// </summary>
-        private bool Working;
         
         /// <summary>
         /// Sync lock for thread safety
@@ -151,12 +147,12 @@ namespace Pinger
         private object Lock = new object();
         
         /// <summary>
-        /// Handle to the task spanwed by this PingWorker to continuously perform pings
+        /// The timer which invokes the ping callback at set intervals
         /// </summary>
-        private Task WorkerTaskHandle;
+        private Timer PingTimer;
 
         /// <summary>
-        /// Collection to hold all ping results if KeepResults is set ot true
+        /// Collection to hold all ping results if KeepResults is set to true
         /// </summary>
         private List<PingResult> Results = new List<PingResult>();
 
@@ -170,7 +166,7 @@ namespace Pinger
         /// </summary>
         private void ThrowIfWorking()
         {
-            if (Working)
+            if (PingTimer != null)
             {
                 throw new InvalidOperationException("Unable to set properties while PingWorker is working");
             }
@@ -182,96 +178,90 @@ namespace Pinger
         /// </summary>
         public void Start()
         {
-            if (Working)
+            if (PingTimer != null)
             {
                 return;
             }
+
             lock(Lock)
             {
-                if (Working)
+                if (PingTimer != null)
                 {
                     return;
                 }
+
                 Results.Clear();
                 Report.Reset();
-                Working = true;
+                PingTimer = new Timer(PingCallback, null, 100, Infinity);
             }
-
-            WorkerTaskHandle = Task.Run(() =>
-            {
-                for (;;)
-                {
-                    if (!Working)
-                    {
-                        return;
-                    }
-
-                    Stopwatch watch = new Stopwatch();
-                    watch.Start();
-                    PingResult result = PingTask.Sync(Host, Timeout, Bytes);
-                    if (KeepResults)
-                    {
-                        Results.Add(result);
-                    }
-                    Report.AddToReport(result);
-                    if (PingComplete != null)
-                    {
-                        PingComplete.Invoke(this, new PingCompleteEventArgs(result));
-                    }
-                    watch.Stop();
-
-                    // Idle for the appropriate amount of time but check Working flag for faster Stop response time
-                    int wait = Math.Max(200, TimeBetween - (int)watch.ElapsedMilliseconds);
-                    DateTimeOffset goAgain = DateTimeOffset.Now.AddMilliseconds(wait);
-                    while(DateTimeOffset.Now < goAgain)
-                    {
-                        if (!Working)
-                        {
-                            return;
-                        }
-                        Thread.Sleep(1);
-                    }
-                }
-            });
         }
 
         /// <summary>
-        /// Stops the PingWorker and blocks until its Task is finished
+        /// Stops the PingWorker
         /// </summary>
         public void Stop()
         {
-            if (Working == false)
-            {
-                return;
-            }
             lock(Lock)
             {
-                if (Working == false)
+                if (PingTimer == null)
                 {
                     return;
                 }
-                Working = false;
-                WorkerTaskHandle.Wait();
+
+                PingTimer.Dispose();
+                PingTimer = null;
             }
         }
 
         /// <summary>
-        /// Gets the report on the diagnostic ping test last performed
+        /// Gets the report on the diagnostic ping test
         /// </summary>
         /// <returns>The ping report</returns>
         public PingReport GetReport()
         {
-            return Report;
+            lock(Lock)
+            {
+                return Report.Copy();
+            }
         }
 
         /// <summary>
         /// Gets ALL detailed ping results for each ping conducted during the last test performed;
-        /// note this list will be EMPTY unless you set KeepResults to true before starting
+        /// this list will be EMPTY unless you set KeepResults to true before starting
         /// </summary>
         /// <returns></returns>
         public List<PingResult> GetResults()
         {
-            return Results;
+            lock(Lock)
+            {
+                return Results.Select(x => x.Copy()).ToList();
+            }
+        }
+
+        private void PingCallback(object state) // state not used
+        {
+            Stopwatch watch = new Stopwatch();
+            watch.Start();
+            PingResult result = PingTask.Sync(Host, Timeout, Bytes);
+            lock(Lock)
+            {
+                if (PingTimer == null)
+                {
+                    return;
+                }
+                if (KeepResults)
+                {
+                    Results.Add(result);
+                }
+                Report.AddToReport(result);
+                if (PingComplete != null)
+                {
+                    PingComplete.Invoke(this, new PingCompleteEventArgs(result));
+                }
+                watch.Stop();
+                int next = Math.Max(200, TimeBetween - (int)watch.ElapsedMilliseconds);
+                PingTimer.Change(next, Infinity);
+            }            
         }
     }
 

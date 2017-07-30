@@ -61,6 +61,7 @@ namespace EverPingUi
             Button_Stop.Enabled = started;
             Button_Save.Enabled = !string.IsNullOrEmpty(CurrentReport);
             Button_Defaults.Enabled = !started;
+            Button_Clear.Enabled = !started;
 
             TextBox_Host.ReadOnly = started;
             TextBox_Timeout.ReadOnly = started;
@@ -119,9 +120,9 @@ namespace EverPingUi
             }
         }
 
-        private void OnTextBoxFocusEnter(object sender, EventArgs e)
+        private void Button_Clear_Click(object sender, EventArgs e)
         {
-            ((TextBox)sender).SelectAll();
+            RichTextBox_Log.Clear();
         }
 
         private void ShowError(string message)
@@ -173,8 +174,9 @@ namespace EverPingUi
 
         private void OnPingComplete(object sender, PingCompleteEventArgs e)
         {
-            string text = string.Format("{0}{1}", FormatResult(e.Result), Environment.NewLine);
             RichTextBox_Log.Invoke(new Action(() => {
+                string text = string.Format("{0}{1}", RichTextBox_Log.TextLength == 0 ? string.Empty : Environment.NewLine, FormatResult(e.Result));
+
                 RichTextBox_Log.SelectionStart = RichTextBox_Log.TextLength;
                 RichTextBox_Log.SelectionLength = 0;
 
@@ -210,7 +212,7 @@ namespace EverPingUi
         private void ReportOnResults()
         {
             StringBuilder builder = new StringBuilder();
-            builder.Append(Environment.NewLine);
+            builder.AppendFormat("{0}{0}", Environment.NewLine);
 
             builder.AppendFormat("Ping statistics for {0} from {1} to {2} ({3} minutes):{4}",
                 PingReport.Host,
@@ -236,7 +238,7 @@ namespace EverPingUi
 
             builder.AppendLine("Video game health analysis:");
 
-            builder.AppendFormat("    High ping events = {0} ({1} per hour), Potential disconnects = {2} ({3} per hour){4}{4}",
+            builder.AppendFormat("    High ping events = {0} ({1} per hour), Potential disconnects = {2} ({3} per hour){4}",
                 PingReport.HighPingEvents,
                 PingReport.HighPingEventsPerHour.ToString("0.00"),
                 PingReport.PotentialDisconnects,

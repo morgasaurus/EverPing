@@ -100,58 +100,66 @@ namespace Pinger
         private bool DisconnectEventRecorded;
 
         /// <summary>
+        /// Lock for thread safety
+        /// </summary>
+        private object Lock = new object();
+
+        /// <summary>
         /// Updates the current diagnostic ping test report using the specified PingResult
         /// </summary>
         /// <param name="result">The ping result</param>
         public void AddToReport(PingResult result)
         {
-            // Set the host and start time on the initial ping
-            if (string.IsNullOrEmpty(Host))
+            lock(Lock)
             {
-                Host = result.Host;
-            }
-            if (Start == default(DateTimeOffset))
-            {
-                Start = result.Sent;
-            }
-
-            Sent++;
-
-            if (string.IsNullOrEmpty(result.ErrorMessage))
-            {
-                Min = Math.Min(Min, (int)result.Milliseconds);
-                Max = Math.Max(Max, (int)result.Milliseconds);
-                Average = (Average * Received + (decimal)result.Milliseconds) / (Received + 1);
-
-                if (result.Milliseconds >= CodeOrange)
+                // Set the host and start time on the initial ping
+                if (string.IsNullOrEmpty(Host))
                 {
-                    HighPingEvents++;
+                    Host = result.Host;
+                }
+                if (Start == default(DateTimeOffset))
+                {
+                    Start = result.Sent;
                 }
 
-                Received++;
-                Dropping = false;
-                DisconnectEventRecorded = false;
-            }
-            else
-            {
-                // Record potential disconnects only once and only on consecutively dropped packets
-                if (Dropping == true && DisconnectEventRecorded == false)
+                Sent++;
+
+                if (string.IsNullOrEmpty(result.ErrorMessage))
                 {
-                    PotentialDisconnects++;
-                    DisconnectEventRecorded = true;
+                    Min = Math.Min(Min, (int)result.Milliseconds);
+                    Max = Math.Max(Max, (int)result.Milliseconds);
+                    Average = (Average * Received + (decimal)result.Milliseconds) / (Received + 1);
+
+                    if (result.Milliseconds >= CodeOrange)
+                    {
+                        HighPingEvents++;
+                    }
+
+                    Received++;
+                    Dropping = false;
+                    DisconnectEventRecorded = false;
                 }
-                Dropping = true;
+                else
+                {
+                    // Record potential disconnects only once and only on consecutively dropped packets
+                    if (Dropping == true && DisconnectEventRecorded == false)
+                    {
+                        PotentialDisconnects++;
+                        DisconnectEventRecorded = true;
+                    }
+                    Dropping = true;
+                }
+
+                // Do calculations
+                Lost = Sent - Received;
+                PacketLoss = (decimal)Lost / (decimal)Sent;
+
+                End = DateTimeOffset.Now;
+                Duration = End - Start;
+                decimal hours = (decimal)Duration.TotalHours;
+                HighPingEventsPerHour = HighPingEvents / hours;
+                PotentialDisconnectsPerHour = PotentialDisconnects / hours;
             }
-
-            // Do calculations
-            Lost = Sent - Received;
-            PacketLoss = (decimal)Lost / (decimal)Sent;
-
-            End = DateTimeOffset.Now;
-            Duration = End - Start;
-            decimal hours = (decimal)Duration.TotalHours;
-            HighPingEventsPerHour = HighPingEvents / hours;
-            PotentialDisconnectsPerHour = PotentialDisconnects / hours;
         }
 
         /// <summary>
@@ -159,10 +167,12 @@ namespace Pinger
         /// </summary>
         public void Reset()
         {
+            Host = string.Empty;
+
             Start = default(DateTimeOffset);
             End = default(DateTimeOffset);
+            Duration = default(TimeSpan);
 
-            Host = string.Empty;
             Sent = 0;
             Received = 0;
             Lost = 0;
@@ -173,10 +183,45 @@ namespace Pinger
             Average = 0m;
 
             HighPingEvents = 0;
+            HighPingEventsPerHour = 0;
             PotentialDisconnects = 0;
+            PotentialDisconnectsPerHour = 0;
 
             Dropping = false;
             DisconnectEventRecorded = false;
+        }
+
+        public PingReport Copy()
+        {
+            lock(Lock)
+            {
+                PingReport report = new PingReport();
+
+                report.Host = Host;
+
+                report.Start = Start;
+                report.End = End;
+                report.Duration = Duration;
+
+                report.Sent = Sent;
+                report.Received = Received;
+                report.Lost = Lost;
+                report.PacketLoss = PacketLoss;
+
+                report.Min = Min;
+                report.Max = Max;
+                report.Average = Average;
+
+                report.HighPingEvents = HighPingEvents;
+                report.HighPingEventsPerHour = HighPingEventsPerHour;
+                report.PotentialDisconnects = PotentialDisconnects;
+                report.PotentialDisconnectsPerHour = PotentialDisconnectsPerHour;
+
+                report.Dropping = Dropping;
+                report.DisconnectEventRecorded = DisconnectEventRecorded;
+
+                return report;
+            }
         }
     }
 }
